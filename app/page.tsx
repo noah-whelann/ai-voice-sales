@@ -1,103 +1,145 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useRef, useState } from "react";
+
+export default function Page() {
+  const [isRecording, setIsRecording] = useState(false);
+  const [heard, setHeard] = useState("");
+  const [reply, setReply] = useState("");
+  const mediaRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const speakingRef = useRef(false);
+
+  const speak = (text: string, onend?: () => void) => {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {}
+    const u = new SpeechSynthesisUtterance(text);
+    u.onstart = () => (speakingRef.current = true);
+    u.onend = () => {
+      speakingRef.current = false;
+      onend?.();
+    };
+    window.speechSynthesis.speak(u);
+  };
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    mediaRef.current = mr;
+    chunksRef.current = [];
+    mr.ondataavailable = (e) => {
+      if (e.data.size) chunksRef.current.push(e.data);
+    };
+    mr.onstop = async () => {
+      setIsRecording(false);
+      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+      chunksRef.current = [];
+      const fd = new FormData();
+      fd.append("file", blob, "speech.webm");
+      const tr = await fetch("/api/transcribe", { method: "POST", body: fd })
+        .then((r) => r.json())
+        .catch(() => ({ text: "" }));
+      const text = tr.text || "";
+      setHeard(text);
+      const chat = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userSpeech: text }),
+      })
+        .then((r) => r.json())
+        .catch(() => ({ assistant: "Sorry, I hit an error." }));
+      const a =
+        chat.assistant || "Could you share your name, email, and phone?";
+      setReply(a);
+      speak(a);
+    };
+    mr.start();
+    setIsRecording(true);
+  };
+
+  const stopRecording = () => {
+    try {
+      mediaRef.current?.stop();
+    } catch {}
+    try {
+      mediaRef.current?.stream.getTracks().forEach((t) => t.stop());
+    } catch {}
+  };
+
+  useEffect(() => () => stopRecording(), []);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <main className="min-h-screen bg-[radial-gradient(1200px_800px_at_100%_-10%,#dbeafe_0%,transparent_60%),radial-gradient(900px_600px_at_-10%_0%,#fce7f3_0%,transparent_55%),linear-gradient(to_bottom,#ffffff,#fafafa)]">
+      <div className="mx-auto max-w-2xl px-6 py-16">
+        <div className="mb-8 flex items-center justify-between">
+          <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
+            AI Voice Sales
+          </h1>
+          <div className="flex items-center gap-2">
+            <span
+              className={`relative inline-flex h-2.5 w-2.5 items-center justify-center`}
+            >
+              <span
+                className={`absolute inline-flex h-full w-full rounded-full ${isRecording ? "bg-red-500 opacity-75 animate-ping" : "bg-gray-300"}`}
+              />
+              <span
+                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isRecording ? "bg-red-500" : "bg-gray-300"}`}
+              />
+            </span>
+            <span className="text-sm text-gray-600">
+              {isRecording ? "Recording" : "Idle"}
+            </span>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+
+        <div className="rounded-3xl border border-gray-200 bg-white/70 backdrop-blur-sm shadow-[0_10px_40px_-20px_rgba(0,0,0,0.25)]">
+          <div className="p-6 sm:p-8">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={startRecording}
+                disabled={isRecording}
+                className={`h-12 rounded-2xl px-5 text-sm font-medium transition-shadow focus:outline-none focus:ring-2 focus:ring-offset-2 ${isRecording ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-gray-900 text-white hover:shadow-[0_10px_30px_-12px_rgba(0,0,0,0.6)] focus:ring-gray-900"}`}
+                aria-label="Start recording"
+              >
+                <span className="mr-1">🎤</span> Start
+              </button>
+              <button
+                onClick={stopRecording}
+                disabled={!isRecording}
+                className={`h-12 rounded-2xl px-5 text-sm font-medium transition-shadow focus:outline-none focus:ring-2 focus:ring-offset-2 ${!isRecording ? "bg-gray-200 text-gray-500 cursor-not-allowed" : "bg-white text-gray-900 border border-gray-300 hover:shadow-[0_10px_30px_-12px_rgba(0,0,0,0.2)] focus:ring-gray-300"}`}
+                aria-label="Stop recording"
+              >
+                ⏹ Stop
+              </button>
+            </div>
+
+            <div className="mt-8 grid gap-5">
+              <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-5">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Heard
+                </div>
+                <p className="min-h-6 whitespace-pre-wrap text-sm leading-6 text-gray-800">
+                  {heard || "—"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-5">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Reply
+                </div>
+                <p className="min-h-6 whitespace-pre-wrap text-sm leading-6 text-gray-900">
+                  {reply || "—"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-200 bg-white/60 px-6 py-4 text-center text-xs text-gray-500 sm:px-8">
+            Speak, we transcribe and respond out loud.
+          </div>
+        </div>
+      </div>
+    </main>
   );
 }
